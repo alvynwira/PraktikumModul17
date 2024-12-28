@@ -23,6 +23,7 @@ Auth::routes();
 
 Route::get('/home', [App\Http\Controllers\HomeController::class, 'index'])->name('home');
 Route::post('/login', [LoginController::class, 'authenticate']);
+Route::get('getEmployees', [EmployeeController::class, 'getData'])->name('employees.getData');
 
 Route::get('/local-disk', function () {
     Storage::disk('local')->put('local-example.txt', 'This is local example content');
@@ -89,3 +90,6 @@ Route::post('/upload-example', function (Request $request) {
 })->name('upload-example');
 
 Route::get('download-file/{employeeId}', [EmployeeController::class, 'downloadFile'])->name('employees.downloadFile');
+Route::delete('/employees/{employeeId}/deleteFile', [EmployeeController::class, 'deleteFile'])->name('employees.deleteFile');
+Route::get('exportExcel', [EmployeeController::class, 'exportExcel'])->name('employees.exportExcel');
+Route::get('exportPdf', [EmployeeController::class, 'exportPdf'])->name('employees.exportPdf');

@@ -9,6 +9,15 @@ use Illuminate\Support\Str;
 use App\Models\Employee;
 use App\Models\Position;
 use Illuminate\Support\Facades\Storage;
+use Maatwebsite\Excel\Facades\Excel;
+use RealRashid\SweetAlert\Facades\Alert;
+use App\Exports\EmployeesExport;
+use Barryvdh\DomPDF\Facade\Pdf as FacadePdf;
+use Barryvdh\DomPDF\PDF as DomPDFPDF;
+use PDF;
+
+
+
 
 class EmployeeController extends Controller
 {
@@ -18,13 +27,15 @@ class EmployeeController extends Controller
     public function index()
     {
         $pageTitle = 'Employee List';
+        confirmDelete();
+        $positions = Position::all();
 
         // ELOQUENT
-        $employees = Employee::all();
+        // $employees = Employee::all();
 
         return view('employee.index', [
             'pageTitle' => $pageTitle,
-            'employees' => $employees
+            'positions' => $positions
         ]);
     }
 
@@ -84,7 +95,7 @@ class EmployeeController extends Controller
             $employee->encrypted_filename = $encryptedFilename;
         }
         $employee->save();
-
+        Alert::success('Added Successfully', 'Employee Data Added Successfully.');
         return redirect()->route('employees.index');
     }
 
@@ -154,7 +165,7 @@ class EmployeeController extends Controller
         }
 
         $employee->save();
-
+        Alert::success('Changed Successfully', 'Employee Data Changed Successfully.');
         return redirect()->route('employees.index')->with('success', 'Employee updated successfully');
     }
 
@@ -164,7 +175,7 @@ class EmployeeController extends Controller
     {
         // ELOQUENT
         Employee::find($id)->delete();
-
+        Alert::success('Deleted Successfully', 'Employee Data Deleted Successfully.');
         return redirect()->route('employees.index');
     }
 
@@ -177,5 +188,47 @@ class EmployeeController extends Controller
         if (Storage::exists($encryptedFilename)) {
             return Storage::download($encryptedFilename, $downloadFilename);
         }
+    }
+    public function deleteFile($employeeId)
+    {
+        $employee = Employee::findOrFail($employeeId);
+
+        if ($employee->cv) {
+            // Hapus file fisik jika ada
+            Storage::delete($employee->cv);
+            // Kosongkan kolom cv di database
+            $employee->cv = null;
+            $employee->original_filename = null;
+            $employee->save();
+        }
+
+        return redirect()->back()->with('success', 'CV berhasil dihapus.');
+    }
+
+
+    public function getData(Request $request)
+    {
+        $employees = Employee::with('position');
+
+        if ($request->ajax()) {
+            return datatables()->of($employees)
+                ->addIndexColumn()
+                ->addColumn('actions', function ($employee) {
+                    return view('employee.actions', compact('employee'));
+                })
+                ->toJson();
+        }
+    }
+    public function exportExcel()
+    {
+        return Excel::download(new EmployeesExport, 'employees.xlsx');
+    }
+    public function exportPdf()
+    {
+        $employees = Employee::all();
+
+        $pdf = FacadePdf::loadView('employee.export_pdf', compact('employees'));
+
+        return $pdf->download('employees.pdf');
     }
 }
