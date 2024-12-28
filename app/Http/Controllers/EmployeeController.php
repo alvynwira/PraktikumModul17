@@ -2,20 +2,18 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
+use App\Models\Position;
+use App\Models\Employee;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
-use App\Models\Employee;
-use App\Models\Position;
-use Illuminate\Support\Facades\Storage;
-use Maatwebsite\Excel\Facades\Excel;
+use Illuminate\Http\Request;
+use Illuminate\Routing\Controller;
 use RealRashid\SweetAlert\Facades\Alert;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\EmployeesExport;
-use Barryvdh\DomPDF\Facade\Pdf as FacadePdf;
-use Barryvdh\DomPDF\PDF as DomPDFPDF;
-use PDF;
-
+use Barryvdh\DomPDF\Facade\Pdf;
 
 
 
@@ -29,19 +27,15 @@ class EmployeeController extends Controller
         $pageTitle = 'Employee List';
         confirmDelete();
         $positions = Position::all();
-
-        // ELOQUENT
-        // $employees = Employee::all();
-
         return view('employee.index', [
             'pageTitle' => $pageTitle,
             'positions' => $positions
         ]);
     }
 
-
-
-
+    /**
+     * Show the form for creating a new resource.
+     */
     public function create()
     {
         $pageTitle = 'Create Employee';
@@ -51,6 +45,10 @@ class EmployeeController extends Controller
 
         return view('employee.create', compact('pageTitle', 'positions'));
     }
+
+    /**
+     * Store a newly created resource in storage.
+     */
 
     public function store(Request $request)
     {
@@ -94,13 +92,16 @@ class EmployeeController extends Controller
             $employee->original_filename = $originalFilename;
             $employee->encrypted_filename = $encryptedFilename;
         }
+
         $employee->save();
+
         Alert::success('Added Successfully', 'Employee Data Added Successfully.');
+
         return redirect()->route('employees.index');
     }
-
-
-
+    /**
+     * Display the specified resource.
+     */
     public function show(string $id)
     {
         $pageTitle = 'Employee Detail';
@@ -110,7 +111,6 @@ class EmployeeController extends Controller
 
         return view('employee.show', compact('pageTitle', 'employee'));
     }
-
 
     /**
      * Show the form for editing the specified resource.
@@ -126,12 +126,15 @@ class EmployeeController extends Controller
         return view('employee.edit', compact('pageTitle', 'positions', 'employee'));
     }
 
+    /**
+     * Update the specified resource in storage.
+     */
     public function update(Request $request, string $id)
     {
         $messages = [
             'required' => ':Attribute harus diisi.',
-            'email' => 'Isi :attribute dengan format yang benar',
-            'numeric' => 'Isi :attribute dengan angka'
+            'email' => 'Isi :attribute dengan format yang benar.',
+            'numeric' => 'Isi :attribute dengan angka.'
         ];
 
         $validator = Validator::make($request->all(), [
@@ -139,7 +142,6 @@ class EmployeeController extends Controller
             'lastName' => 'required',
             'email' => 'required|email',
             'age' => 'required|numeric',
-            'cv' => 'nullable|file|mimes:pdf,doc,docx|max:2048',
         ], $messages);
 
         if ($validator->fails()) {
@@ -147,17 +149,26 @@ class EmployeeController extends Controller
         }
 
         // ELOQUENT
-        $employee = Employee::findOrFail($id);
+        $employee = Employee::find($id);
         $employee->firstname = $request->firstName;
         $employee->lastname = $request->lastName;
         $employee->email = $request->email;
         $employee->age = $request->age;
         $employee->position_id = $request->position;
 
-        if ($request->hasFile('cv')) {
-            $file = $request->file('cv');
+        $file = $request->file('cv');
+
+        if ($file) {
+            if ($employee->encrypted_filename) {
+                $oldFile = 'public/files/' . $employee->encrypted_filename;
+                if (Storage::exists($oldFile)) {
+                    Storage::delete($oldFile);
+                }
+            }
+
             $originalFilename = $file->getClientOriginalName();
             $encryptedFilename = $file->hashName();
+
             $file->store('public/files');
 
             $employee->original_filename = $originalFilename;
@@ -165,17 +176,27 @@ class EmployeeController extends Controller
         }
 
         $employee->save();
+
         Alert::success('Changed Successfully', 'Employee Data Changed Successfully.');
-        return redirect()->route('employees.index')->with('success', 'Employee updated successfully');
+
+        return redirect()->route('employees.index');
     }
 
-
-
+    /**
+     * Remove the specified resource from storage.
+     */
     public function destroy(string $id)
     {
-        // ELOQUENT
-        Employee::find($id)->delete();
+        $employee = Employee::findOrFail($id);
+
+        if ($employee->encrypted_filename && Storage::exists('public/files/' . $employee->encrypted_filename)) {
+            Storage::delete('public/files/' . $employee->encrypted_filename);
+        }
+
+        $employee->delete();
+
         Alert::success('Deleted Successfully', 'Employee Data Deleted Successfully.');
+
         return redirect()->route('employees.index');
     }
 
@@ -189,23 +210,6 @@ class EmployeeController extends Controller
             return Storage::download($encryptedFilename, $downloadFilename);
         }
     }
-    public function deleteFile($employeeId)
-    {
-        $employee = Employee::findOrFail($employeeId);
-
-        if ($employee->cv) {
-            // Hapus file fisik jika ada
-            Storage::delete($employee->cv);
-            // Kosongkan kolom cv di database
-            $employee->cv = null;
-            $employee->original_filename = null;
-            $employee->save();
-        }
-
-        return redirect()->back()->with('success', 'CV berhasil dihapus.');
-    }
-
-
     public function getData(Request $request)
     {
         $employees = Employee::with('position');
@@ -227,7 +231,7 @@ class EmployeeController extends Controller
     {
         $employees = Employee::all();
 
-        $pdf = FacadePdf::loadView('employee.export_pdf', compact('employees'));
+        $pdf = PDF::loadView('employee.export_pdf', compact('employees'));
 
         return $pdf->download('employees.pdf');
     }
