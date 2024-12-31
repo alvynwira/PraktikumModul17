@@ -1,95 +1,238 @@
 <?php
 
-use App\Http\Controllers\Auth\LoginController;
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\HomeController;
-use App\Http\Controllers\EmployeeController;
-use App\Http\Controllers\ProfileController;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+namespace App\Http\Controllers;
+
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
-
-Route::get('/', function () {
-    return redirect()->route('login');
-});
-
-Route::get('home', [HomeController::class, 'index'])->name('home');
-
-Route::resource('employees', EmployeeController::class);
-Route::get('profile', ProfileController::class)->name('profile');
-Route::post('employees/{id}', [EmployeeController::class, 'update'])->name('employees.update');
-
-Auth::routes();
-
-Route::get('/home', [App\Http\Controllers\HomeController::class, 'index'])->name('home');
-Route::post('/login', [LoginController::class, 'authenticate']);
-Route::get('getEmployees', [EmployeeController::class, 'getData'])->name('employees.getData');
-
-Route::get('/local-disk', function () {
-    Storage::disk('local')->put('local-example.txt', 'This is local example content');
-    return asset('storage/local-example.txt');
-});
+use App\Models\Position;
+use App\Models\Employee;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
+use Illuminate\Routing\Controller;
+use RealRashid\SweetAlert\Facades\Alert;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\EmployeesExport;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 
-Route::get('/public-disk', function () {
-    Storage::disk('public')->put('public-example.txt', 'This is public example content');
-    return asset('storage/public-example.txt');
-});
 
-Route::get('/retrieve-local-file', function () {
-    if (Storage::disk('local')->exists('local-example.txt')) {
-        $contents = Storage::disk('local')->get('local-example.txt');
-    } else {
-        $contents = 'File does not exist';
+class EmployeeController extends Controller
+{
+    /**
+     * Display a listing of the resource.
+     */
+    public function index()
+    {
+        $pageTitle = 'Employee List';
+        confirmDelete();
+        $positions = Position::all();
+        return view('employee.index', [
+            'pageTitle' => $pageTitle,
+            'positions' => $positions
+        ]);
     }
 
-    return $contents;
-});
+    /**
+     * Show the form for creating a new resource.
+     */
+    public function create()
+    {
+        $pageTitle = 'Create Employee';
 
-Route::get('/retrieve-public-file', function () {
-    if (Storage::disk('public')->exists('public-example.txt')) {
-        $contents = Storage::disk('public')->get('public-example.txt');
-    } else {
-        $contents = 'File does not exist';
+        // ELOQUENT
+        $positions = Position::all();
+
+        return view('employee.create', compact('pageTitle', 'positions'));
     }
 
-    return $contents;
-});
+    /**
+     * Store a newly created resource in storage.
+     */
 
-Route::get('/download-local-file', function () {
-    return Storage::download('local-example.txt', 'local file');
-});
+    public function store(Request $request)
+    {
+        $messages = [
+            'required' => ':Attribute harus diisi.',
+            'email' => 'Isi :attribute dengan format yang benar',
+            'numeric' => 'Isi :attribute dengan angka'
+        ];
 
-Route::get('/download-public-file', function () {
-    return Storage::download('public/public-example.txt', 'public file');
-});
+        $validator = Validator::make($request->all(), [
+            'firstName' => 'required',
+            'lastName' => 'required',
+            'email' => 'required|email',
+            'age' => 'required|numeric',
+        ], $messages);
 
-Route::get('/file-url', function () {
-    // Just prepend "/storage" to the given path and return a relative URL
-    $url = Storage::url('local-example.txt');
-    return $url;
-});
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput();
+        }
 
-Route::get('/file-size', function () {
-    $size = Storage::size('local-example.txt');
-    return $size;
-});
+        // Get File
+        $file = $request->file('cv');
 
-Route::get('/file-path', function () {
-    $path = Storage::path('local-example.txt');
-    return $path;
-});
+        if ($file != null) {
+            $originalFilename = $file->getClientOriginalName();
+            $encryptedFilename = $file->hashName();
 
-Route::get('/upload-example', function () {
-    return view('upload_example');
-});
+            // Store File
+            $file->store('public/files');
+        }
 
-Route::post('/upload-example', function (Request $request) {
-    $path = $request->file('avatar')->store('public');
-    return $path;
-})->name('upload-example');
+        // ELOQUENT
+        $employee = new Employee;
+        $employee->firstname = $request->firstName;
+        $employee->lastname = $request->lastName;
+        $employee->email = $request->email;
+        $employee->age = $request->age;
+        $employee->position_id = $request->position;
 
-Route::get('download-file/{employeeId}', [EmployeeController::class, 'downloadFile'])->name('employees.downloadFile');
-Route::delete('/employees/{employeeId}/deleteFile', [EmployeeController::class, 'deleteFile'])->name('employees.deleteFile');
-Route::get('exportExcel', [EmployeeController::class, 'exportExcel'])->name('employees.exportExcel');
-Route::get('exportPdf', [EmployeeController::class, 'exportPdf'])->name('employees.exportPdf');
+        if ($file != null) {
+            $employee->original_filename = $originalFilename;
+            $employee->encrypted_filename = $encryptedFilename;
+        }
+
+        $employee->save();
+
+        Alert::success('Added Successfully', 'Employee Data Added Successfully.');
+
+        return redirect()->route('employees.index');
+    }
+    /**
+     * Display the specified resource.
+     */
+    public function show(string $id)
+    {
+        $pageTitle = 'Employee Detail';
+
+        // ELOQUENT
+        $employee = Employee::find($id);
+
+        return view('employee.show', compact('pageTitle', 'employee'));
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(string $id)
+    {
+        $pageTitle = 'Edit Employee';
+
+        // ELOQUENT
+        $positions = Position::all();
+        $employee = Employee::find($id);
+
+        return view('employee.edit', compact('pageTitle', 'positions', 'employee'));
+    }
+
+    /**
+     * Update the specified resource in storage.
+     */
+    public function update(Request $request, string $id)
+    {
+        $messages = [
+            'required' => ':Attribute harus diisi.',
+            'email' => 'Isi :attribute dengan format yang benar.',
+            'numeric' => 'Isi :attribute dengan angka.'
+        ];
+
+        $validator = Validator::make($request->all(), [
+            'firstName' => 'required',
+            'lastName' => 'required',
+            'email' => 'required|email',
+            'age' => 'required|numeric',
+        ], $messages);
+
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput();
+        }
+
+        // ELOQUENT
+        $employee = Employee::find($id);
+        $employee->firstname = $request->firstName;
+        $employee->lastname = $request->lastName;
+        $employee->email = $request->email;
+        $employee->age = $request->age;
+        $employee->position_id = $request->position;
+
+        $file = $request->file('cv');
+
+        if ($file) {
+            if ($employee->encrypted_filename) {
+                $oldFile = 'public/files/' . $employee->encrypted_filename;
+                if (Storage::exists($oldFile)) {
+                    Storage::delete($oldFile);
+                }
+            }
+
+            $originalFilename = $file->getClientOriginalName();
+            $encryptedFilename = $file->hashName();
+
+            $file->store('public/files');
+
+            $employee->original_filename = $originalFilename;
+            $employee->encrypted_filename = $encryptedFilename;
+        }
+
+        $employee->save();
+
+        Alert::success('Changed Successfully', 'Employee Data Changed Successfully.');
+
+        return redirect()->route('employees.index');
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(string $id)
+    {
+        $employee = Employee::findOrFail($id);
+
+        if ($employee->encrypted_filename && Storage::exists('public/files/' . $employee->encrypted_filename)) {
+            Storage::delete('public/files/' . $employee->encrypted_filename);
+        }
+
+        $employee->delete();
+
+        Alert::success('Deleted Successfully', 'Employee Data Deleted Successfully.');
+
+        return redirect()->route('employees.index');
+    }
+
+    public function downloadFile($employeeId)
+    {
+        $employee = Employee::find($employeeId);
+        $encryptedFilename = 'public/files/' . $employee->encrypted_filename;
+        $downloadFilename = Str::lower($employee->firstname . '_' . $employee->lastname . '_cv.pdf');
+
+        if (Storage::exists($encryptedFilename)) {
+            return Storage::download($encryptedFilename, $downloadFilename);
+        }
+    }
+    public function getData(Request $request)
+    {
+        $employees = Employee::with('position');
+
+        if ($request->ajax()) {
+            return datatables()->of($employees)
+                ->addIndexColumn()
+                ->addColumn('actions', function ($employee) {
+                    return view('employee.actions', compact('employee'));
+                })
+                ->toJson();
+        }
+    }
+    public function exportExcel()
+    {
+        return Excel::download(new EmployeesExport, 'employees.xlsx');
+    }
+    public function exportPdf()
+    {
+        $employees = Employee::all();
+
+        $pdf = PDF::loadView('employee.export_pdf', compact('employees'));
+
+        return $pdf->download('employees.pdf');
+    }
+}
